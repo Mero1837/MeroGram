@@ -7,17 +7,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Diagnose generator
+      - name: Find td_api.tl
         shell: pwsh
         run: |
-          dotnet --list-sdks
-          Write-Host "TL exists: $(Test-Path Libraries\tdjson\td_api.tl)"
-          Get-ChildItem Libraries\tdjson -ErrorAction SilentlyContinue | Select-Object -First 30 | ForEach-Object { Write-Host "TDJSON: $($_.Name)" }
-          $p = Get-ChildItem Telegram.Generators.Cli -Filter *.csproj | Select-Object -First 1
-          Write-Host "CLI PROJECT: $($p.FullName)"
-          dotnet build $p.FullName -c Release 2>&1 | Select-Object -Last 15
-          $dll = "Telegram.Generators.Cli\bin\Release\net10.0\Telegram.Generators.Cli.dll"
-          Write-Host "DLL exists: $(Test-Path $dll)"
-          dotnet $dll --schema Libraries\tdjson\td_api.tl --out "$env:RUNNER_TEMP\tdschema" --parsers Pointer 2>&1 | Select-Object -First 40
-          Write-Host "EXIT: $LASTEXITCODE"
+          Write-Host "== FIND TL =="
+          Get-ChildItem -Recurse -Filter "td_api.tl" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "TL: $($_.FullName.Replace($PWD.Path,''))" }
+          Write-Host "== LIBRARIES =="
+          Get-ChildItem Libraries -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "LIB: $($_.Name)" }
+          Write-Host "== TDJSON =="
+          Get-ChildItem Libraries\tdjson -Force -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "TDJSON: $($_.Name)" }
+          Write-Host "== GITMODULES =="
+          Get-Content .gitmodules
+          Write-Host "== TARGETS =="
+          Get-Content Telegram\TdSchema.targets | Select-Object -First 80
           exit 0

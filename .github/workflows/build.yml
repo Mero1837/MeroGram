@@ -1,23 +1,29 @@
 name: build
 on: workflow_dispatch
 jobs:
-  diag:
+  build:
     runs-on: windows-latest
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Find td_api.tl
+      - uses: microsoft/setup-msbuild@v2
+      - uses: nuget/setup-nuget@v2
+      - name: Find and build
         shell: pwsh
         run: |
-          Write-Host "== FIND TL =="
-          Get-ChildItem -Recurse -Filter "td_api.tl" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "TL: $($_.FullName.Replace($PWD.Path,''))" }
-          Write-Host "== LIBRARIES =="
-          Get-ChildItem Libraries -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "LIB: $($_.Name)" }
-          Write-Host "== TDJSON =="
-          Get-ChildItem Libraries\tdjson -Force -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "TDJSON: $($_.Name)" }
-          Write-Host "== GITMODULES =="
-          Get-Content .gitmodules
-          Write-Host "== TARGETS =="
-          Get-Content Telegram\TdSchema.targets | Select-Object -First 80
-          exit 0
+          Copy-Item Libraries\tdlib\td\generate\scheme\td_api.tl Libraries\tdjson\td_api.tl -Force
+          $t = Get-ChildItem -Filter *.slnx | Select-Object -First 1
+          if (-not $t) { Write-Host "NO SLNX FOUND"; exit 1 }
+          msbuild $t.FullName -t:Restore -p:RestorePackagesConfig=true -p:Configuration=Release -p:Platform=x64
+          msbuild $t.FullName /m:1 /p:Configuration=Release /p:Platform=x64 /p:AppxBundle=Never "/flp:logfile=errors.log;errorsonly;verbosity=quiet"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: out
+          path: |
+            errors.log
+            AppPackages/**
+            Unigram/**/AppPackages/**
+          if-no-files-found: warn

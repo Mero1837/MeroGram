@@ -10,6 +10,17 @@ jobs:
           submodules: recursive
       - uses: microsoft/setup-msbuild@v2
       - uses: nuget/setup-nuget@v2
+      - name: Install gperf
+        shell: pwsh
+        run: |
+          choco install gperf -y --no-progress
+          $gperf = Get-Command gperf -ErrorAction SilentlyContinue
+          if (-not $gperf) {
+            $p = Get-ChildItem "C:\ProgramData\chocolatey\lib\gperf" -Recurse -Filter gperf.exe | Select-Object -First 1
+            "$($p.DirectoryName)" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+            $env:PATH = "$($p.DirectoryName);$env:PATH"
+          }
+          gperf --version
       - name: Build tdjson
         shell: pwsh
         run: |

@@ -12,9 +12,12 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          Get-ChildItem -Filter *.sln | ForEach-Object { Write-Host "SLN: $($_.Name)" }
-          nuget restore Unigram.sln
-          msbuild Unigram.sln /m /p:Configuration=Release /p:Platform=x64 /p:AppxBundle=Never
+          $all = Get-ChildItem -Recurse -Filter *.sln | Select-Object -ExpandProperty FullName
+          $all | ForEach-Object { Write-Host "SLN: $_" }
+          $sln = $all | Where-Object { $_ -like "*\Unigram.sln" } | Select-Object -First 1
+          if (-not $sln) { throw "Unigram.sln not found" }
+          nuget restore $sln
+          msbuild $sln /m /p:Configuration=Release /p:Platform=x64 /p:AppxBundle=Never
       - uses: actions/upload-artifact@v4
         if: always()
         with:

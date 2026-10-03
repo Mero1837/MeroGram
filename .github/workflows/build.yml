@@ -8,14 +8,18 @@ jobs:
         with:
           submodules: recursive
       - uses: microsoft/setup-msbuild@v2
-      - uses: nuget/setup-nuget@v2
-      - name: Build
+      - name: Find and build
         shell: pwsh
         run: |
-          Get-ChildItem -Filter *.sln | ForEach-Object { Write-Host "ROOT-SLN: $($_.Name)" }
-          if (-not (Test-Path Telegram.sln)) { throw "Telegram.sln not found" }
-          nuget restore Telegram.sln
-          msbuild Telegram.sln /m /p:Configuration=Release /p:Platform=x64 /p:AppxBundle=Never
+          Write-Host "== ROOT FILES =="
+          Get-ChildItem | ForEach-Object { Write-Host "ROOT: $($_.Name)" }
+          Write-Host "== SOLUTIONS =="
+          Get-ChildItem -Recurse -Include *.slnx,*.sln,*.wapproj | ForEach-Object { Write-Host "FOUND: $($_.FullName.Replace($PWD.Path,''))" }
+          $t = Get-ChildItem -Filter *.slnx | Select-Object -First 1
+          if (-not $t) { $t = Get-ChildItem -Recurse -Filter *.wapproj | Select-Object -First 1 }
+          if (-not $t) { Write-Host "NO TARGET FOUND"; exit 1 }
+          Write-Host "BUILDING: $($t.FullName)"
+          msbuild $t.FullName -restore /m /p:Configuration=Release /p:Platform=x64 /p:AppxBundle=Never
       - uses: actions/upload-artifact@v4
         if: always()
         with:

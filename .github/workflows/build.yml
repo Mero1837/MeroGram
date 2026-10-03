@@ -14,14 +14,14 @@ jobs:
         run: |
           $t = Get-ChildItem -Filter *.slnx | Select-Object -First 1
           if (-not $t) { Write-Host "NO SLNX FOUND"; exit 1 }
-          Write-Host "BUILDING: $($t.FullName)"
           msbuild $t.FullName -t:Restore -p:RestorePackagesConfig=true -p:Configuration=Release -p:Platform=x64
-          if ($LASTEXITCODE -ne 0) { Write-Host "RESTORE FAILED"; exit 1 }
-          msbuild $t.FullName /m /p:Configuration=Release /p:Platform=x64 /p:AppxBundle=Never
+          msbuild $t.FullName /m /p:Configuration=Release /p:Platform=x64 /p:AppxBundle=Never "/flp:logfile=errors.log;errorsonly;verbosity=quiet"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: out
           path: |
-            **/AppPackages/**
-            **/bin/x64/Release/**
+            errors.log
+            AppPackages/**
+            Unigram/**/AppPackages/**
+          if-no-files-found: warn

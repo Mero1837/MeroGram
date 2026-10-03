@@ -1,21 +1,37 @@
 name: build
 on: workflow_dispatch
 jobs:
-  diag:
+  build:
     runs-on: windows-latest
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Read tdjson build script
+      - uses: microsoft/setup-msbuild@v2
+      - uses: nuget/setup-nuget@v2
+      - name: Build tdjson
         shell: pwsh
         run: |
-          Write-Host "== BUILD.PS1 =="
-          Get-Content Libraries\tdjson\build.ps1 | Select-Object -First 90
-          Write-Host "== LIBRARIES.MD =="
-          Get-Content Libraries\Libraries.md -ErrorAction SilentlyContinue | Select-Object -First 40
-          Write-Host "== TDLIB DIR =="
-          Get-ChildItem Libraries\tdlib | Select-Object -First 25 | ForEach-Object { Write-Host "TDLIB: $($_.Name)" }
-          Write-Host "== VCPKG-PORTS =="
-          Get-ChildItem Libraries\vcpkg-ports | Select-Object -First 15 | ForEach-Object { Write-Host "PORTS: $($_.Name)" }
-          exit 0
+          Copy-Item Libraries\tdlib\td\generate\scheme\td_api.tl Libraries\tdjson\td_api.tl -Force
+          Push-Location Libraries\tdjson
+          Write-Host "VCPKG ROOT: $env:VCPKG_INSTALLATION_ROOT"
+          & .\build.ps1 -vcpkg_root $env:VCPKG_INSTALLATION_ROOT -arch x64 *>&1 | Tee-Object -FilePath ..\..\tdjson.log
+          Pop-Location
+          Get-ChildItem Libraries\tdjson\x64 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "OUT: $($_.Name)" }
+      - name: Build app
+        shell: pwsh
+        run: |
+          $t = Get-ChildItem -Filter *.slnx | Select-Object -First 1
+          msbuild $t.FullName -t:Restore -p:RestorePackagesConfig=true -p:Configuration=Release -p:Platform=x64
+          msbuild $t.FullName /m:1 /p:Configuration=Release /p:Platform=x64 /p:AppxBundle=Never "/flp:logfile=errors.log;errorsonly;verbosity=quiet"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: out
+          path: |
+            errors.log
+            tdjson.log
+            AppPackages/**
+            Unigram/**/AppPackages/**
+          if-no-files-found: warn

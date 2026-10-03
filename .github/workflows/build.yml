@@ -30,12 +30,24 @@ jobs:
           & .\build.ps1 -vcpkg_root $env:VCPKG_INSTALLATION_ROOT -arch x64 *>&1 | Tee-Object -FilePath ..\..\tdjson.log
           Pop-Location
           Get-ChildItem Libraries\tdjson\x64 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "OUT: $($_.Name)" }
+      - name: Create signing cert
+        shell: pwsh
+        run: |
+          $m = Get-ChildItem -Recurse -Filter Package.appxmanifest | Where-Object { $_.FullName -notmatch 'Libraries' } | Select-Object -First 1
+          Write-Host "MANIFEST: $($m.FullName)"
+          [xml]$x = Get-Content $m.FullName
+          $pub = $x.Package.Identity.Publisher
+          Write-Host "PUBLISHER: $pub"
+          $cert = New-SelfSignedCertificate -Type Custom -Subject $pub -KeyUsage DigitalSignature -FriendlyName "MeroGram" -CertStoreLocation "Cert:\CurrentUser\My" -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3","2.5.29.19={text}")
+          $pw = ConvertTo-SecureString "mero123" -AsPlainText -Force
+          Export-PfxCertificate -Cert $cert -FilePath "$env:RUNNER_TEMP\key.pfx" -Password $pw
+          Export-Certificate -Cert $cert -FilePath "MeroGram.cer"
       - name: Build app
         shell: pwsh
         run: |
           $t = Get-ChildItem -Filter *.slnx | Select-Object -First 1
           msbuild $t.FullName -t:Restore -p:RestorePackagesConfig=true -p:Configuration=Release -p:Platform=x64
-          msbuild $t.FullName /m:1 /p:Configuration=Release /p:Platform=x64 /p:AppxBundle=Never "/flp:logfile=errors.log;errorsonly;verbosity=quiet"
+          msbuild $t.FullName /m:1 /p:Configuration=Release /p:Platform=x64 /p:AppxBundle=Never /p:UapAppxPackageBuildMode=SideloadOnly /p:AppxPackageSigningEnabled=true "/p:PackageCertificateKeyFile=$env:RUNNER_TEMP\key.pfx" /p:PackageCertificatePassword=mero123 "/flp:logfile=errors.log;errorsonly;verbosity=quiet"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -43,6 +55,6 @@ jobs:
           path: |
             errors.log
             tdjson.log
-            AppPackages/**
-            Unigram/**/AppPackages/**
+            MeroGram.cer
+            **/AppPackages/**
           if-no-files-found: warn

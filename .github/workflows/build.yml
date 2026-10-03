@@ -1,29 +1,21 @@
 name: build
 on: workflow_dispatch
 jobs:
-  build:
+  diag:
     runs-on: windows-latest
-    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: microsoft/setup-msbuild@v2
-      - uses: nuget/setup-nuget@v2
-      - name: Find and build
+      - name: Read tdjson build script
         shell: pwsh
         run: |
-          Copy-Item Libraries\tdlib\td\generate\scheme\td_api.tl Libraries\tdjson\td_api.tl -Force
-          $t = Get-ChildItem -Filter *.slnx | Select-Object -First 1
-          if (-not $t) { Write-Host "NO SLNX FOUND"; exit 1 }
-          msbuild $t.FullName -t:Restore -p:RestorePackagesConfig=true -p:Configuration=Release -p:Platform=x64
-          msbuild $t.FullName /m:1 /p:Configuration=Release /p:Platform=x64 /p:AppxBundle=Never "/flp:logfile=errors.log;errorsonly;verbosity=quiet"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: out
-          path: |
-            errors.log
-            AppPackages/**
-            Unigram/**/AppPackages/**
-          if-no-files-found: warn
+          Write-Host "== BUILD.PS1 =="
+          Get-Content Libraries\tdjson\build.ps1 | Select-Object -First 90
+          Write-Host "== LIBRARIES.MD =="
+          Get-Content Libraries\Libraries.md -ErrorAction SilentlyContinue | Select-Object -First 40
+          Write-Host "== TDLIB DIR =="
+          Get-ChildItem Libraries\tdlib | Select-Object -First 25 | ForEach-Object { Write-Host "TDLIB: $($_.Name)" }
+          Write-Host "== VCPKG-PORTS =="
+          Get-ChildItem Libraries\vcpkg-ports | Select-Object -First 15 | ForEach-Object { Write-Host "PORTS: $($_.Name)" }
+          exit 0

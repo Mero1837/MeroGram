@@ -1,28 +1,23 @@
 name: build
 on: workflow_dispatch
 jobs:
-  build:
+  diag:
     runs-on: windows-latest
-    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: microsoft/setup-msbuild@v2
-      - uses: nuget/setup-nuget@v2
-      - name: Find and build
+      - name: Diagnose generator
         shell: pwsh
         run: |
-          $t = Get-ChildItem -Filter *.slnx | Select-Object -First 1
-          if (-not $t) { Write-Host "NO SLNX FOUND"; exit 1 }
-          msbuild $t.FullName -t:Restore -p:RestorePackagesConfig=true -p:Configuration=Release -p:Platform=x64
-          msbuild $t.FullName /m:1 /p:Configuration=Release /p:Platform=x64 /p:AppxBundle=Never "/flp:logfile=errors.log;errorsonly;verbosity=quiet"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: out
-          path: |
-            errors.log
-            AppPackages/**
-            Unigram/**/AppPackages/**
-          if-no-files-found: warn
+          dotnet --list-sdks
+          Write-Host "TL exists: $(Test-Path Libraries\tdjson\td_api.tl)"
+          Get-ChildItem Libraries\tdjson -ErrorAction SilentlyContinue | Select-Object -First 30 | ForEach-Object { Write-Host "TDJSON: $($_.Name)" }
+          $p = Get-ChildItem Telegram.Generators.Cli -Filter *.csproj | Select-Object -First 1
+          Write-Host "CLI PROJECT: $($p.FullName)"
+          dotnet build $p.FullName -c Release 2>&1 | Select-Object -Last 15
+          $dll = "Telegram.Generators.Cli\bin\Release\net10.0\Telegram.Generators.Cli.dll"
+          Write-Host "DLL exists: $(Test-Path $dll)"
+          dotnet $dll --schema Libraries\tdjson\td_api.tl --out "$env:RUNNER_TEMP\tdschema" --parsers Pointer 2>&1 | Select-Object -First 40
+          Write-Host "EXIT: $LASTEXITCODE"
+          exit 0

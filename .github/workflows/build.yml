@@ -146,6 +146,10 @@ jobs:
           Get-ChildItem -Recurse -Directory -Filter AppPackages -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'vcpkg_installed|\\Libraries\\' } | ForEach-Object { Copy-Item "$($_.FullName)\*" dist -Recurse -Force }
           Copy-Item MeroGram.cer dist -ErrorAction SilentlyContinue
           Get-ChildItem dist -Recurse | ForEach-Object { Write-Host "DIST: $($_.FullName.Replace($PWD.Path,''))" }
+      - name: Strip appxsym
+        if: always()
+        shell: pwsh
+        run: Get-ChildItem dist -Recurse -Filter *.appxsym -ErrorAction SilentlyContinue | Remove-Item -Force
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -155,5 +159,5 @@ jobs:
             errors.log
             tdjson.log
             patch.txt
-          retention-days: 1
+          retention-days: 3
           if-no-files-found: warn

@@ -42,21 +42,19 @@ jobs:
           $hash = $env:TG_API_HASH.Trim()
           if ($id -notmatch '^\d+$') { throw "TG_API_ID must be digits only" }
           if ($hash -notmatch '^[0-9a-fA-F]{32}$') { throw "TG_API_HASH must be 32 hex chars" }
-          $changed = 0
-          foreach ($f in Get-ChildItem Telegram -Filter "Constants*.cs") {
-            $t = Get-Content $f.FullName -Raw
-            $n = [regex]::Replace($t, '(\bApiId\s*=(?!=)\s*)[^;]+;', "`${1}$id;")
-            $n = [regex]::Replace($n, '(\bApiHash\s*=(?!=)\s*)"[^"]*";', "`${1}`"$hash`";")
-            if ($n -ne $t) { Set-Content $f.FullName $n -NoNewline; $changed++; Write-Host "PATCHED: $($f.Name)" }
-          }
-          if ($changed -eq 0) {
-            Write-Host "No ApiId/ApiHash definition found. Candidates:"
-            Get-ChildItem Telegram -Recurse -Include *.cs | Select-String -Pattern '\bApiId\b' | Select-Object -First 15 | ForEach-Object { Write-Host "$($_.Filename):$($_.LineNumber): $($_.Line.Trim())" }
-            exit 1
-          }
-          $ok = Get-ChildItem Telegram -Filter "Constants*.cs" | Select-String -Pattern "ApiId\s*=\s*$id\b" -Quiet
-          if (-not $ok) { throw "ApiId not applied" }
-          Write-Host "API keys applied"
+          Get-ChildItem Telegram -Filter "Constants*" | ForEach-Object { Write-Host "FILE: $($_.Name)" }
+          Write-Host "== Constants.cs (first 60 lines) =="
+          Get-Content Telegram\Constants.cs | Select-Object -First 60 | ForEach-Object { Write-Host $_ }
+          $cs = Get-Content Telegram\Constants.cs -Raw
+          if ($cs -match 'static\s+Constants\s*\(') { throw "Constants.cs already has a static constructor" }
+          if ($cs -notmatch 'partial\s+class\s+Constants') { throw "Constants is not a partial class" }
+          if ($cs -notmatch 'readonly\s+\w+\s+ApiId\b') { throw "ApiId is not a readonly field" }
+          if ($cs -notmatch 'readonly\s+\w+\s+ApiHash\b') { throw "ApiHash is not a readonly field" }
+          $body = @("            ApiId = $id;", "            ApiHash = `"$hash`";")
+          if ($cs -match 'readonly\s+\w+\s+AppChannel\b') { $body += '            AppChannel = "unigram";' }
+          $lines = @('namespace Telegram','{','    public static partial class Constants','    {','        static Constants()','        {') + $body + @('        }','    }','}')
+          Set-Content -Path Telegram\Constants.Secret.cs -Value $lines -Encoding UTF8
+          Write-Host "Secret file written with $($body.Count) assignments"
       - name: Patch audio settings
         shell: pwsh
         run: |

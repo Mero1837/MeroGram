@@ -1,6 +1,28 @@
 name: build
 on: workflow_dispatch
 jobs:
+  scan:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Scan
+        shell: pwsh
+        run: |
+          $o = New-Object System.Collections.Generic.List[string]
+          $o.Add("== CONSTANTS KEYS ==")
+          Get-ChildItem Telegram -Filter "Constants*.cs" -ErrorAction SilentlyContinue | Select-String -Pattern 'ApiId|ApiHash|AppChannel' | ForEach-Object { $o.Add("$($_.Filename):$($_.LineNumber): $($_.Line.Trim())") }
+          $src = Get-ChildItem Libraries\tgcalls, Telegram.Native.Calls -Recurse -Include *.cpp,*.cc,*.h,*.mm -ErrorAction SilentlyContinue
+          $o.Add("== DELAY / BUFFER ==")
+          $src | Select-String -Pattern 'jitter|min_delay|playout_delay|PlayoutDelay|target_delay' | Select-Object -First 40 | ForEach-Object { $o.Add("$($_.Path.Replace($PWD.Path,'')):$($_.LineNumber): $($_.Line.Trim())") }
+          $o.Add("== PROCESSING ==")
+          $src | Select-String -Pattern 'echo_cancel|noise_suppress|auto_gain|high_pass|audio_processing|AudioProcessing' | Select-Object -First 30 | ForEach-Object { $o.Add("$($_.Path.Replace($PWD.Path,'')):$($_.LineNumber): $($_.Line.Trim())") }
+          $o | Set-Content scan.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scan
+          path: scan.txt
   build:
     runs-on: windows-latest
     timeout-minutes: 350
@@ -10,7 +32,74 @@ jobs:
           submodules: recursive
       - uses: microsoft/setup-msbuild@v2
       - uses: nuget/setup-nuget@v2
+      - name: Set API keys
+        shell: pwsh
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          $id = $env:TG_API_ID.Trim()
+          $hash = $env:TG_API_HASH.Trim()
+          if ($id -notmatch '^\d+$') { throw "TG_API_ID must be digits only" }
+          if ($hash -notmatch '^[0-9a-fA-F]{32}$') { throw "TG_API_HASH must be 32 hex chars" }
+          $changed = 0
+          foreach ($f in Get-ChildItem Telegram -Filter "Constants*.cs") {
+            $t = Get-Content $f.FullName -Raw
+            $n = [regex]::Replace($t, '(\bApiId\s*=(?!=)\s*)[^;]+;', "`${1}$id;")
+            $n = [regex]::Replace($n, '(\bApiHash\s*=(?!=)\s*)"[^"]*";', "`${1}`"$hash`";")
+            if ($n -ne $t) { Set-Content $f.FullName $n -NoNewline; $changed++; Write-Host "PATCHED: $($f.Name)" }
+          }
+          if ($changed -eq 0) {
+            Write-Host "No ApiId/ApiHash definition found. Candidates:"
+            Get-ChildItem Telegram -Recurse -Include *.cs | Select-String -Pattern '\bApiId\b' | Select-Object -First 15 | ForEach-Object { Write-Host "$($_.Filename):$($_.LineNumber): $($_.Line.Trim())" }
+            exit 1
+          }
+          $ok = Get-ChildItem Telegram -Filter "Constants*.cs" | Select-String -Pattern "ApiId\s*=\s*$id\b" -Quiet
+          if (-not $ok) { throw "ApiId not applied" }
+          Write-Host "API keys applied"
+      - name: Patch audio settings
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem Libraries\tgcalls, Telegram.Native.Calls -Recurse -Include *.cpp,*.cc,*.h,*.mm -ErrorAction SilentlyContinue
+          $rules = @(
+            @('(jitter_buffer_min_delay_ms\s*=\s*)\d+', '${1}0'),
+            @('(jitter_buffer_max_packets\s*=\s*)\d+', '${1}20'),
+            @('(jitter_buffer_fast_accelerate\s*=\s*)(true|false)', '${1}true'),
+            @('(echo_cancellation\s*=\s*)true', '${1}false'),
+            @('(noise_suppression\s*=\s*)true', '${1}false'),
+            @('(auto_gain_control\s*=\s*)true', '${1}false'),
+            @('(highpass_filter\s*=\s*)true', '${1}false')
+          )
+          $rep = New-Object System.Collections.Generic.List[string]
+          foreach ($f in $files) {
+            $t = Get-Content $f.FullName -Raw
+            $n = $t
+            foreach ($r in $rules) {
+              $m = [regex]::Matches($n, $r[0]).Count
+              if ($m -gt 0) { $n = [regex]::Replace($n, $r[0], $r[1]); $rep.Add("$($f.Name): $($r[0]) x$m") }
+            }
+            if ($n -ne $t) { Set-Content $f.FullName $n -NoNewline }
+          }
+          if ($rep.Count -eq 0) { $rep.Add("NO AUDIO SETTINGS FOUND - nothing patched") }
+          $rep | Set-Content patch.txt
+          $rep | ForEach-Object { Write-Host $_ }
+      - name: TDLib cache key
+        id: tdkey
+        shell: pwsh
+        run: |
+          $h = git -C Libraries/tdlib rev-parse HEAD
+          "key=$h" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+      - name: Restore tdjson cache
+        id: tdcache
+        uses: actions/cache/restore@v4
+        with:
+          path: Libraries/tdjson/x64
+          key: tdjson-${{ steps.tdkey.outputs.key }}-${{ hashFiles('Libraries/tdjson/build.ps1') }}
+      - name: Copy td_api.tl
+        shell: pwsh
+        run: Copy-Item Libraries\tdlib\td\generate\scheme\td_api.tl Libraries\tdjson\td_api.tl -Force
       - name: Install gperf
+        if: steps.tdcache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           choco install gperf -y --no-progress
@@ -22,22 +111,25 @@ jobs:
           }
           gperf --version
       - name: Build tdjson
+        if: steps.tdcache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          Copy-Item Libraries\tdlib\td\generate\scheme\td_api.tl Libraries\tdjson\td_api.tl -Force
           Push-Location Libraries\tdjson
-          Write-Host "VCPKG ROOT: $env:VCPKG_INSTALLATION_ROOT"
           & .\build.ps1 -vcpkg_root $env:VCPKG_INSTALLATION_ROOT -arch x64 *>&1 | Tee-Object -FilePath ..\..\tdjson.log
           Pop-Location
           Get-ChildItem Libraries\tdjson\x64 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "OUT: $($_.Name)" }
+      - name: Save tdjson cache
+        if: steps.tdcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: Libraries/tdjson/x64
+          key: tdjson-${{ steps.tdkey.outputs.key }}-${{ hashFiles('Libraries/tdjson/build.ps1') }}
       - name: Create signing cert
         shell: pwsh
         run: |
           $m = Get-ChildItem -Recurse -Filter Package.appxmanifest | Where-Object { $_.FullName -notmatch 'Libraries' } | Select-Object -First 1
-          Write-Host "MANIFEST: $($m.FullName)"
           [xml]$x = Get-Content $m.FullName
           $pub = $x.Package.Identity.Publisher
-          Write-Host "PUBLISHER: $pub"
           $cert = New-SelfSignedCertificate -Type Custom -Subject $pub -KeyUsage DigitalSignature -FriendlyName "MeroGram" -CertStoreLocation "Cert:\CurrentUser\My" -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3","2.5.29.19={text}")
           $pw = ConvertTo-SecureString "mero123" -AsPlainText -Force
           Export-PfxCertificate -Cert $cert -FilePath "$env:RUNNER_TEMP\key.pfx" -Password $pw
@@ -48,13 +140,22 @@ jobs:
           $t = Get-ChildItem -Filter *.slnx | Select-Object -First 1
           msbuild $t.FullName -t:Restore -p:RestorePackagesConfig=true -p:Configuration=Release -p:Platform=x64
           msbuild $t.FullName /m:1 /p:Configuration=Release /p:Platform=x64 /p:AppxBundle=Never /p:UapAppxPackageBuildMode=SideloadOnly /p:AppxPackageSigningEnabled=true "/p:PackageCertificateKeyFile=$env:RUNNER_TEMP\key.pfx" /p:PackageCertificatePassword=mero123 "/flp:logfile=errors.log;errorsonly;verbosity=quiet"
+      - name: Collect package
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist -Force | Out-Null
+          Get-ChildItem -Recurse -Directory -Filter AppPackages -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'vcpkg_installed|\\Libraries\\' } | ForEach-Object { Copy-Item "$($_.FullName)\*" dist -Recurse -Force }
+          Copy-Item MeroGram.cer dist -ErrorAction SilentlyContinue
+          Get-ChildItem dist -Recurse | ForEach-Object { Write-Host "DIST: $($_.FullName.Replace($PWD.Path,''))" }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: out
           path: |
+            dist
             errors.log
             tdjson.log
-            MeroGram.cer
-            **/AppPackages/**
+            patch.txt
+          retention-days: 1
           if-no-files-found: warn

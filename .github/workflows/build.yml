@@ -150,12 +150,19 @@ jobs:
         if: always()
         shell: pwsh
         run: Get-ChildItem dist -Recurse -Filter *.appxsym -ErrorAction SilentlyContinue | Remove-Item -Force
+      - name: Pack
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path dist) { Compress-Archive -Path dist\* -DestinationPath MeroGram.zip -Force; (Get-FileHash MeroGram.zip -Algorithm SHA256).Hash | Set-Content hash.txt }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: out
+          compression-level: 0
           path: |
-            dist
+            MeroGram.zip
+            hash.txt
             errors.log
             tdjson.log
             patch.txt

@@ -24,6 +24,10 @@ jobs:
           name: scan
           path: scan.txt
   build:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [full, keys, clean]
     runs-on: windows-latest
     timeout-minutes: 350
     steps:
@@ -33,6 +37,7 @@ jobs:
       - uses: microsoft/setup-msbuild@v2
       - uses: nuget/setup-nuget@v2
       - name: Set API keys
+        if: matrix.variant != 'clean'
         shell: pwsh
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
@@ -56,6 +61,7 @@ jobs:
           Set-Content -Path Telegram\Constants.Secret.cs -Value $lines -Encoding UTF8
           Write-Host "Secret file written with $($body.Count) assignments"
       - name: Patch audio settings
+        if: matrix.variant == 'full'
         shell: pwsh
         run: |
           $files = Get-ChildItem Libraries\tgcalls, Telegram.Native.Calls -Recurse -Include *.cpp,*.cc,*.h,*.mm -ErrorAction SilentlyContinue
@@ -158,7 +164,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: out
+          name: out-${{ matrix.variant }}
           compression-level: 0
           path: |
             MeroGram.zip

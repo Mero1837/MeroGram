@@ -27,12 +27,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [full, keys, clean]
+        variant: [clean]
     runs-on: windows-latest
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
         with:
+          repository: UnigramDev/Unigram
+          ref: v12.10.7
           submodules: recursive
       - uses: microsoft/setup-msbuild@v2
       - uses: nuget/setup-nuget@v2
